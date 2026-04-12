@@ -65,7 +65,6 @@ class WikidataRedirectsFixingBot(WikidataEntityBot):
         pywikibot.info(f'{item} --> {target}')
         backlinks = item.backlinks(follow_redirects=False,
                                    filter_redirects=None,
-                                   namespaces=[0, 120])
                                    namespaces=[0, 120, 146])
         summary = self.summary.format(
             item.title(with_ns=True), target.title(with_ns=True))
