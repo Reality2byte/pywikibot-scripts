@@ -13,5 +13,5 @@ SELECT DISTINCT ?item {
     ?st3 prov:wasDerivedFrom ?ref .
     ?entity ?p3 ?st3 .
   } .
-  FILTER( NOW() - ?date > %(days)d ) .
+  FILTER( ?date < "%(date)s"^^xsd:dateTime ) .
 } ORDER BY ?date

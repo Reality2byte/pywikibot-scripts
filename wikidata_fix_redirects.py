@@ -1,4 +1,5 @@
 #!/usr/bin/python
+from datetime import datetime, timedelta
 from itertools import chain
 
 import pywikibot
@@ -29,7 +30,9 @@ class WikidataRedirectsFixingBot(WikidataEntityBot):
         self.summary = 'fix redirect [[{}]] → [[{}]]'
 
     def custom_generator(self):
-        query = self.store.build_query('redirects', days=self.opt['days'])
+        time = datetime.now() - timedelta(days=self.opt['days'])
+        query = self.store.build_query(
+            'redirects', date=time.isoformat(timespec='seconds'))
         return WikidataSPARQLPageGenerator(query, site=self.repo)
 
     def skip_page(self, item):
@@ -41,12 +44,11 @@ class WikidataRedirectsFixingBot(WikidataEntityBot):
     def update_snak(self, snak, old_target, new_target):
         if snak.snaktype != 'value':
             return False
-        if snak.type == 'wikibase-item':
+        if snak.type in ('wikibase-item', 'wikibase-lexeme'):
             eq = snak.target_equals(old_target)
             if eq:
                 snak.setTarget(new_target)
             return eq
-        #elif snak.type == 'wikibase-lexeme':
         elif snak.type == 'quantity':
             eq = snak.target.unit == old_target.concept_uri()
             if eq:
@@ -64,6 +66,7 @@ class WikidataRedirectsFixingBot(WikidataEntityBot):
         backlinks = item.backlinks(follow_redirects=False,
                                    filter_redirects=None,
                                    namespaces=[0, 120])
+                                   namespaces=[0, 120, 146])
         summary = self.summary.format(
             item.title(with_ns=True), target.title(with_ns=True))
         if self.opt.editgroups:
@@ -78,6 +81,7 @@ class WikidataRedirectsFixingBot(WikidataEntityBot):
                 continue
             callbacks = []
             update = []
+            # TODO: forms, senses
             for claim in chain.from_iterable(entity.claims.values()):
                 changed = False
                 if self.update_snak(claim, item, target):
