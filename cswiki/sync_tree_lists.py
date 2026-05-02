@@ -1,10 +1,12 @@
 #!/usr/bin/python
 import re
+from collections import defaultdict
 
 import mwparserfromhell
 import pywikibot
 
 from pywikibot import pagegenerators
+from pywikibot.data.sparql import *
 from pywikibot.textlib import FILE_LINK_REGEX
 from pywikibot.tools import first_upper
 
@@ -33,10 +35,20 @@ if not generator:
 
 ignore_images = {'Noimage 2-1.png'}
 
-# todo: cache all in a single query
-query = '''SELECT DISTINCT ?item {
-  { ?item wdt:P3296 "%s" } UNION { ?item wdt:P677 "%s" }
-} LIMIT 2'''
+query = 'SELECT DISTINCT ?item ?id { ?item wdt:%s ?id }'
+props = ('P3296', 'P677')
+
+obj = SparqlQuery(repo=repo)
+id_to_items_per_prop = {}
+for prop in props:
+    mapping = defaultdict(set)
+    result = obj.select(query % prop, full_data=True)
+    for entry in result:
+        item = entry['item'].getID()
+        id_ = entry['id'].value
+        mapping[id_].add(item)
+    id_to_items_per_prop[prop] = mapping
+    del result
 
 titleR = re.compile(r'(\s*)([^[|\]<>]+?)((?: *†| *\(x\))?\s*)')
 fileR = re.compile(FILE_LINK_REGEX % '|'.join(site.namespaces[6]), re.VERBOSE)
@@ -78,15 +90,18 @@ for page in generator:
                     params.append(str(template.get(i)).strip())
                 else:
                     params.append('')
-            items = list(pagegenerators.WikidataSPARQLPageGenerator(
-                query % tuple(params[:2]), site=repo))
+        
+            items = set()
+            for prop, id_ in zip(props, params):
+                items |= id_to_items_per_prop[prop].get(id_, items)
+
             if len(items) != 1:
                 pywikibot.info(
                     f"Couldn't determine the item for values "
                     f'{params[0]}/{params[1]} ({len(items)} items)')
                 continue
 
-            item = items.pop()
+            item = pywikibot.ItemPage(repo, items.pop())
             if params[2] != item.getID():  # 3rd param is index 2
                 template.add(3, item.getID())
                 change = True
