@@ -1,4 +1,6 @@
 import re
+from collections import OrderedDict
+from typing import Any
 
 import pywikibot
 from pywikibot.tools.chars import url2string
@@ -31,6 +33,30 @@ class FileRegexHolder:
                 replace += '|' + magicword.replace('$1', r'\d+')
             cls.replaceR = re.compile(replace)
         return cls.replaceR
+
+
+class LRUCache:
+
+    def __init__(self, limit: int) -> None:
+        self._cache = OrderedDict()
+        self.limit = limit
+
+    def has(self, key) -> bool:
+        return key in self._cache
+
+    def get(self, key) -> Any:
+        val = self._cache[key]
+        self._cache.move_to_end(key)
+        return val
+
+    def set(self, key, val: Any) -> None:
+        self._cache[key] = val
+        self._cache.move_to_end(key)
+        self._ensure_limit()
+
+    def _ensure_limit(self) -> None:
+        while len(self._cache) > self.limit:
+            self._cache.popitem(last=False)
 
 
 def deduplicate(arg):

@@ -5,6 +5,7 @@ from pywikibot import pagegenerators
 from pywikibot.data.sparql import SparqlQuery
 
 from query_store import QueryStore
+from tools import get_best_statements, LRUCache
 from wikidata import WikidataEntityBot
 
 
@@ -17,6 +18,7 @@ class DuosManagingBot(WikidataEntityBot):
         'be-tarask': ' і ',
         'bg': ' и ',
         'br': ' ha ',
+        'bs': ' i ',
         'ca': ' i ',
         'cs': ' a ',
         'cy': ' a ',
@@ -32,6 +34,7 @@ class DuosManagingBot(WikidataEntityBot):
         'fr': ' et ',
         'fy': ' en ',
         'gl': ' e ',
+        'he': ' ו ',
         'hr': ' i ',
         'hu': ' és ',
         'id': ' dan ',
@@ -47,6 +50,7 @@ class DuosManagingBot(WikidataEntityBot):
         'oc': ' e ',
         'pl': ' i ',
         'pt': ' e ',
+        'pt-br': ' e ',
         'ro': ' și ',
         'ru': ' и ',
         'sk': ' a ',
@@ -70,13 +74,13 @@ class DuosManagingBot(WikidataEntityBot):
         ('Q14756018', 'twin'),
         ('Q14073567', 'sibling'),
         ('Q3046146', 'spouse'),
-        ('Q106925878', 'father-son'),
+        ('Q1334052', 'parent-child'),
         ('Q1313923', 'relative'),
         # TODO: ('Q1141470', 'comedians'), not a "relation by blood"
     ]
     relation_map = {
         #'comedians': 'P1327',
-        #'father-son': '', we don't know who is who
+        #'parent-child': '', we don't know who is who
         # TODO: 'partner': 'P451',
         'relative': 'P1038',
         'sibling': 'P3373',
@@ -95,6 +99,7 @@ class DuosManagingBot(WikidataEntityBot):
         })
         super().__init__(**kwargs)
         self.store = QueryStore()
+        self.subclass_cache = LRUCache(2048)
         self.sparql = SparqlQuery(repo=self.repo)
         self._generator = generator or self.custom_generator()
 
@@ -119,10 +124,35 @@ class DuosManagingBot(WikidataEntityBot):
         return pagegenerators.PreloadingEntityGenerator(self._generator)
 
     def get_relation(self, item):
-        ask_pattern = 'ASK { wd:%s wdt:P31/wdt:P279* wd:%%s }' % item.id
+        instance_of = get_best_statements(item.claims['P31'])
+        ask_pattern = 'ASK { wd:%s wdt:P279+ wd:%s }'
         for key, rel in self.class_to_relation:
-            if self.sparql.ask(ask_pattern % key):
+            pairs = []
+            for claim in instance_of:
+                if claim.target_equals(key):
+                    return rel
+
+                target = claim.getTarget()
+                if target is not None:
+                    pairs.append(
+                        (target.getID(), key)
+                    )
+
+            if any(
+                self.subclass_cache.has(pair)
+                and self.subclass_cache.get(pair) is True
+                for pair in pairs
+            ):
                 return rel
+
+            for pair in pairs:
+                if self.subclass_cache.has(pair):
+                    continue
+                res = self.sparql.ask(ask_pattern % pair)
+                self.subclass_cache.set(pair, res)
+                if res:
+                    return rel
+
         return None
 
     def get_labels(self, item, relation):
@@ -133,6 +163,7 @@ class DuosManagingBot(WikidataEntityBot):
                 delim.append(self.conj[lang])
             delim.append(' and ')
             delim.append(' & ')
+            delim.append(' / ')
             for conj in delim:
                 label = value.partition(' (')[0]
                 if ', ' in label:
@@ -235,6 +266,9 @@ class DuosManagingBot(WikidataEntityBot):
         instance_of.setTarget(pywikibot.ItemPage(self.repo, 'Q5'))
         part_of = pywikibot.Claim(self.repo, 'P361')
         part_of.setTarget(item)
+        source = pywikibot.Claim(self.repo, 'P3452', is_reference=True)
+        source.setTarget(item)
+        part_of.addSource(source)
 
         pywikibot.info(f'Creating item (relation "{relation}")...')
         new_item = pywikibot.ItemPage(self.repo)
