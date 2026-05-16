@@ -138,7 +138,7 @@ class ExternalIdSlicingBot(WikidataEntityBot):
         else:
             return value[len(split[0]):index].rstrip('/')
 
-    def exit(self):  # fixme: teardown
+    def teardown(self):
         if self.failed:
             text = ''
             for prop in sorted(self.failed):
@@ -149,7 +149,7 @@ class ExternalIdSlicingBot(WikidataEntityBot):
             page = pywikibot.Page(
                 self.repo, f'User:{username}/Wrong external ids')
             page.put(text, summary='update')
-        super().exit()
+        super().teardown()
 
 
 def main(*args):

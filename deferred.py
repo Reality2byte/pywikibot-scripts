@@ -28,11 +28,11 @@ class DeferredCallbacksBot(BaseBot):
             kwargs['callback'] = self.callbacks.pop(0)
         return func(*data, **kwargs)
 
-    def exit(self):
+    def teardown(self):
         pywikibot.info(f'Executing remaining deferred callbacks: {self.queueLen()} left')
         try:
             while self.hasCallbacks():
                 callback = self.callbacks.pop(0)
                 callback()
         finally:
-            super().exit()
+            pass

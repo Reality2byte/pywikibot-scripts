@@ -225,12 +225,10 @@ class DupesMergingBot(WikidataEntityBot):
             self.queue.put(None)
         for worker in self.workers:
             worker.join()
-        super().teardown()
 
-    def exit(self):
-        super().exit()
         bound = self.offset - self.offset % 50
         pywikibot.info(f'\nCurrent offset: {self.offset} (use {bound})\n')
+        super().teardown()
 
 
 def main(*args):

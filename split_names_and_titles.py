@@ -103,9 +103,9 @@ class TitlesMovingBot(WikitextFixingBot):
 
         return before, new_param, after.strip()
 
-    def exit(self):
-        super().exit()
+    def teardown(self):
         pywikibot.info(f'Current offset: {self.offset}')
+        super().teardown()
 
 
 def main(*args):

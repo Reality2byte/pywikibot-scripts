@@ -433,9 +433,9 @@ class InfoboxMigratingBot(WikitextFixingBot):
                     #values.remove('')
                 #while len(set(values)) < len(values): todo
 
-    def exit(self):
-        super().exit()
+    def teardown(self):
         pywikibot.info(f'Current offset: {self.offset}')
+        super().teardown()
 
 # TODO: prepare for extending
 def main(*args):  # bot_class=InfoboxMigratingBot
