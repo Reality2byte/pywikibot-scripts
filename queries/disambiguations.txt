@@ -1,0 +1,11 @@
+SELECT ?item WITH {
+  SELECT DISTINCT ?item {
+    VALUES ?class { %(classes)s } .
+    ?item wdt:P31 ?class; wikibase:sitelinks ?links .
+    FILTER( ?links >= %(min_sitelinks)i ) .
+    #MINUS { ?item wdt:P31 wd:Q101352 } .
+  } OFFSET %(offset)i LIMIT %(limit)i
+} AS %%disambig WHERE {
+  INCLUDE %%disambig .
+  BIND( MD5( CONCAT( STR( ?item ), STR( RAND() ) ) ) AS ?hash ) .
+} ORDER BY ?hash

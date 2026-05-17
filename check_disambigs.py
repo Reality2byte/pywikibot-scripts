@@ -1,10 +1,13 @@
 #!/usr/bin/python
+import re
+
 import pywikibot
 
 from pywikibot import pagegenerators
 from pywikibot.exceptions import NoPageError
 
 from error_reporting import ErrorReportingBot
+from query_store import QueryStore
 from wikidata import WikidataEntityBot
 
 
@@ -23,6 +26,41 @@ class DisambigsCheckingBot(WikidataEntityBot, ErrorReportingBot):
         'specieswiki',
         'towiki',
     }
+    _skip_patterns = [
+        ('bswiki', '%s (čvor)'),
+        ('cawiki', '%s (desambiguació)'),
+        ('cswiki', '%s (rozcestník)'),
+        ('dewiki', '%s (Begriffsklärung)'),
+        ('enwiki', '%s (disambiguation)'),
+        ('eowiki', '%s (apartigilo)'),
+        ('eswiki', '%s (desambiguación)'),
+        ('euwiki', '%s (argipena)'),
+        ('fawiki', '%s (ابهام‌زدایی)'),
+        ('fiwiki', '%s (täsmennyssivu)'),
+        ('frwiki', '%s (homonymie)'),
+        ('hrwiki', '%s (razdvojba)'),
+        ('huwiki', '%s (egyértelműsítő lap)'),
+        ('iawiki', '%s (disambiguation)'),
+        ('idwiki', '%s (disambiguasi)'),
+        ('itwiki', '%s (disambigua)'),
+        ('jvwiki', '%s (disambiguasi)'),
+        ('kkwiki', '%s (айрық)'),
+        ('kowiki', '%s (동음이의)'),
+        ('ltwiki', '%s (reikšmės)'),
+        ('nlwiki', '%s (doorverwijspagina)'),
+        ('nowiki', '%s (andre betydninger)'),
+        ('nowiki', '%s (peker)'),
+        ('plwiki', '%s (ujednoznacznienie)'),
+        ('ptwiki', '%s (desambiguação)'),
+        ('rowiki', '%s (dezambiguizare)'),
+        ('ruwiki', '%s (значения)'),
+        ('shwiki', '%s (razvrstavanje)'),
+        ('skwiki', '%s (rozlišovacia stránka)'),
+        ('slwiki', '%s (razločitev)'),
+        ('srwiki', '%s (вишезначна одредница)'),
+        ('svwiki', '%s (olika betydelser)'),
+        ('ukwiki', '%s (значення)'),
+    ]
     use_from_page = False
 
     def __init__(self, generator=None, **kwargs):
@@ -33,14 +71,31 @@ class DisambigsCheckingBot(WikidataEntityBot, ErrorReportingBot):
             #'only': None, todo
         })
         super().__init__(**kwargs)
+        self.store = QueryStore()
         self.generator = pagegenerators.PreloadingEntityGenerator(
             generator or self.custom_generator()
         )
+        self.skip_patterns = {
+            dbname: re.escape(pattern).replace('%s', '.+', 1)
+            for key, pattern in cls._skip_patterns
+        }
+
+    def custom_generator(self):
+        query = self.store.build_query(
+            'disambiguations',
+            classes=' '.join(f'wd:{item}' for item in self.disambig_items),
+            **self.opt
+        )
+        return pagegenerators.WikidataSPARQLPageGenerator(
+            query, site=self.repo, result_type=list)
 
     def skip_page(self, item):
-        return super().skip_page(item) or (
-            item.title(as_link=True, insite=self.repo) in self.log_page.text
-            or not self.is_disambig(item))
+        if super().skip_page(item):
+            return True
+
+        title = item.title(as_link=True, insite=self.repo)
+        return f'* [[{title}]]' in self.log_page.text \
+               or not self.is_disambig(item)
 
     def is_disambig(self, item):
         for claim in item.claims.get('P31', []):
@@ -48,24 +103,18 @@ class DisambigsCheckingBot(WikidataEntityBot, ErrorReportingBot):
                 return True
         return False
 
-    def custom_generator(self):
-        # todo: move to store
-        QUERY = '''SELECT ?item WITH {
-  SELECT DISTINCT ?item {
-    ?item wdt:P31 wd:%s; wikibase:sitelinks ?links .
-    FILTER( ?links >= %i ) .
-    MINUS { ?item wdt:P31 wd:Q101352 } .
-  } OFFSET %i LIMIT %i
-} AS %%disambig WHERE {
-  INCLUDE %%disambig .
-  BIND( MD5( CONCAT( STR( ?item ), STR( RAND() ) ) ) AS ?hash ) .
-} ORDER BY ?hash''' % (self.disambig_item, self.opt['min_sitelinks'],
-                       self.opt['offset'], self.opt['limit'])
-
-        return pagegenerators.WikidataSPARQLPageGenerator(
-            QUERY, site=self.repo, result_type=list)
+    @classmethod
+    def is_disambig_title(cls, link):
+        dbname = link.site.dbName()
+        title = link.canonical_title()
+        return any(
+            dbname == key and pattern.fullmatch(title)
+            for key, pattern in cls.skip_patterns
+        )
 
     def treat_page_and_item(self, page, item):
+        the_badge = pywikibot.ItemPage(item.repo, 'Q70894304')
+
         append_text = ''
         count = len(item.sitelinks)
         if count == 0:
@@ -73,12 +122,16 @@ class DisambigsCheckingBot(WikidataEntityBot, ErrorReportingBot):
         for dbname in item.sitelinks:
             if dbname in self.skip:
                 continue
-            page = pywikibot.Page(item.sitelinks[dbname])
+
+            sitelink = item.sitelinks[dbname]
+            page = pywikibot.Page(sitelink)
+            args = (dbname, page.title(as_link=True, insite=self.repo))
+
             if not page.exists():
-                append_text += "\n** {} – {} – doesn't exist".format(
-                    dbname, page.title(as_link=True, insite=self.repo))
+                append_text += "\n** {} – {} – doesn't exist".format(*args)
                 continue
-            if page.isRedirectPage():
+
+            if page.isRedirectPage() and the_badge not in sitelink.badges:
                 target = page.getRedirectTarget()
                 try:
                     target_item = target.data_item()
@@ -89,15 +142,18 @@ class DisambigsCheckingBot(WikidataEntityBot, ErrorReportingBot):
                 if not target.isDisambig():
                     link += ', not a disambiguation'
                 append_text += '\n** {} – {} – redirects to {} ({})'.format(
-                    dbname, page.title(as_link=True, insite=self.repo),
-                    target.title(as_link=True, insite=self.repo), link)
+                    *args, target.title(as_link=True, insite=self.repo), link)
                 continue
-            if not page.isDisambig():
-                append_text += '\n** {} – {} – not a disambiguation'.format(
-                    dbname, page.title(as_link=True, insite=self.repo))
+
+            if the_badge in sitelink.badges and not page.isRedirectPage():
+                append_text += '\n** {} – {} - is not redirect despite badge'.format(*args)
+                continue
+
+            if not page.isDisambig() and not self.is_disambig_title(sitelink):
+                append_text += '\n** {} – {} – not a disambiguation'.format(*args)
 
         if append_text:
-            prep = '\n* %s' % item.title(as_link=True, insite=self.repo)
+            prep = '\n* {}'.format(item.title(as_link=True, insite=self.repo))
             if count > 0:
                 prep += f' ({count} sitelink' + ('s' if count > 1 else '') + ')'
             append_text = prep + append_text
